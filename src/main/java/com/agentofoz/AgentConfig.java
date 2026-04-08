@@ -23,7 +23,7 @@ public class AgentConfig {
         
         GoogleAiGeminiChatModel model = GoogleAiGeminiChatModel.builder()
                 .apiKey(geminiApiKey)
-                .modelName("gemini-1.5-pro").build();
+                .modelName("gemini-1.5-pro-002").build();
                 
         return AiServices.builder(BasicAgent.class)
                 .chatLanguageModel((ChatLanguageModel) model)
