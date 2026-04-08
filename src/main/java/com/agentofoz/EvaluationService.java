@@ -1,6 +1,5 @@
 package com.agentofoz;
 
-import com.google.common.util.concurrent.RateLimiter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
@@ -24,9 +23,6 @@ public class EvaluationService {
     private final BasicAgent agent;
     private final WebClient webClient;
     private static final String SCORING_API_URL = "https://agents-course-unit4-scoring.hf.space";
-
-    @SuppressWarnings("UnstableApiUsage")
-    private final RateLimiter rateLimiter = RateLimiter.create(1.0 / 12.0);
 
     public EvaluationService(BasicAgent agent) {
         this.agent = agent;
@@ -128,20 +124,13 @@ public class EvaluationService {
 
     private void processQuestion(GaiaQuestion question, AtomicInteger successCount, AtomicInteger failureCount, ConcurrentLinkedQueue<Map<String, String>> answersQueue) {
         Instant qStart = Instant.now();
+        log.info("[INÍCIO] Processando Task ID: {} | {}", question.id(), question.task());
         
         String agentAnswer = null;
         boolean success = false;
 
         try {
-            // O RateLimiter faz a mágica aqui.
-            @SuppressWarnings("UnstableApiUsage")
-            double tempoEspera = rateLimiter.acquire(); 
-            
-            if (tempoEspera > 1.0) {
-                log.info("RateLimiter segurou a task {} por {} segundos para não estourar a API", question.id(), String.format("%.1f", tempoEspera));
-            }
-            log.info("[INÍCIO] Processando Task ID: {} | {}", question.id(), question.task());
-            
+            // O RateLimiter AGORA É GLOBAL e acontece dentro do 'agent.answer'
             agentAnswer = agent.answer(question.task());
             success = true;
 
@@ -169,7 +158,7 @@ public class EvaluationService {
             }
         } else if (!success) {
             failureCount.incrementAndGet();
-            log.warn("[FALHA TÉCNICA] Questão {} abortada ({}s).", question.id(), elapsed);
+            log.info("[FALHA TÉCNICA] Questão {} abortada ({}s).", question.id(), elapsed);
         }
     }
 }

@@ -28,9 +28,13 @@ public class AgentConfig {
                 .apiKey(geminiApiKey)
                 .modelName("gemini-2.0-flash")
                 .build();
+        
+        // Aplica o RateLimiter GLOBAL no nível do modelo de chat.
+        // 10 RPM (uma chamada a cada 6s) para garantir folga na cota de 15 RPM.
+        ChatModel rateLimitedModel = new RateLimitedChatModel(model, 1.0 / 6.0);
                 
         return AiServices.builder(BasicAgent.class)
-                .chatModel(model)
+                .chatModel(rateLimitedModel)
                 .tools(new ToolGaia(tavilyApiKey))
                 .chatMemory(MessageWindowChatMemory.withMaxMessages(10))
                 .build();
