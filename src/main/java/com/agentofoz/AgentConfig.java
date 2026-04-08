@@ -2,7 +2,7 @@ package com.agentofoz;
 
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
+import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.service.AiServices;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -11,22 +11,24 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class AgentConfig {
 
-    @Value("${GEMINI_API_KEY:demo}")
-    private String geminiApiKey;
+    @Value("${GROQ_API_KEY:demo}")
+    private String groqApiKey;
 
     @Value("${TAVILY_API_KEY:demo}")
     private String tavilyApiKey;
 
     @Bean
     public BasicAgent basicAgent() {
-        if ("demo".equals(geminiApiKey) || geminiApiKey.isBlank()) {
+        if ("demo".equals(groqApiKey) || groqApiKey.isBlank()) {
             // Mock behavior corresponding to the python default
             return question -> "This is a default answer.";
         }
         
-        ChatModel model = GoogleAiGeminiChatModel.builder()
-                .apiKey(geminiApiKey)
-                .modelName("gemini-2.0-flash")
+        ChatModel model = OpenAiChatModel.builder()
+                .baseUrl("https://api.groq.com/openai/v1")
+                .apiKey(groqApiKey)
+                .modelName("llama-3.3-70b-versatile")
+                .temperature(0.0)
                 .build();
                 
         return AiServices.builder(BasicAgent.class)

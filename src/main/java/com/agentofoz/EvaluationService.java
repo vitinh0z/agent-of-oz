@@ -97,7 +97,7 @@ public class EvaluationService {
         
         Instant globalStart = Instant.now();
 
-        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+        try (ExecutorService executor = Executors.newFixedThreadPool(3)) {
             List<CompletableFuture<Void>> futures = questions.stream().map(question -> 
                 CompletableFuture.runAsync(() -> 
                     processQuestion(question, successCount, failureCount, answersQueue), executor)
