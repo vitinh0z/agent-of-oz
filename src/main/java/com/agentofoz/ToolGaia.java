@@ -21,11 +21,11 @@ import java.util.Map;
 @Slf4j
 public class ToolGaia {
 
-    private final String tavilApiKey;
+    private final String tavilyApiKey;
     private final WebClient webClient;
 
-    public ToolGaia(String tavilApiKey) {
-        this.tavilApiKey = tavilApiKey;
+    public ToolGaia(String tavilyApiKey) {
+        this.tavilyApiKey = tavilyApiKey;
         
         HttpClient httpClient = HttpClient.create()
                 .responseTimeout(Duration.ofSeconds(5));
@@ -57,7 +57,7 @@ public class ToolGaia {
 
         try {
             Map<String, Object> body = new HashMap<>(8);
-            body.put("api_key", tavilApiKey);
+            body.put("api_key", tavilyApiKey);
             body.put("query", query);
             body.put("search_depth", "advanced");
             body.put("include_answer", true);

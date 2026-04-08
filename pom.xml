@@ -15,7 +15,7 @@
     <description>Agent of Oz - LangChain4j</description>
     <properties>
         <java.version>21</java.version>
-        <langchain4j.version>0.35.0</langchain4j.version>
+        <langchain4j.version>1.12.2</langchain4j.version>
     </properties>
     <dependencies>
         <dependency>
@@ -39,7 +39,7 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-document-parser-apache-tika</artifactId>
-            <version>${langchain4j.version}</version>
+            <version>0.36.2</version>
         </dependency>
         <dependency>
             <groupId>org.graalvm.polyglot</groupId>
