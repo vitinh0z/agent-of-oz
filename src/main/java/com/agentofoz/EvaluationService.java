@@ -1,5 +1,6 @@
 package com.agentofoz;
 
+import com.google.common.util.concurrent.RateLimiter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
@@ -24,6 +25,9 @@ public class EvaluationService {
     private final WebClient webClient;
     private static final String SCORING_API_URL = "https://agents-course-unit4-scoring.hf.space";
 
+    @SuppressWarnings("UnstableApiUsage")
+    private final RateLimiter rateLimiter = RateLimiter.create(1.0 / 12.0);
+
     public EvaluationService(BasicAgent agent) {
         this.agent = agent;
         this.webClient = WebClient.builder()
@@ -32,9 +36,6 @@ public class EvaluationService {
                 .build();
     }
 
-    /**
-     * Busca a lista de questões do endpoint usando WebClient (não-bloqueante).
-     */
     private List<GaiaQuestion> fetchQuestions() {
         log.info("Buscando questões da API: {}/questions", SCORING_API_URL);
         
@@ -42,7 +43,7 @@ public class EvaluationService {
                 .uri("/questions")
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<List<GaiaQuestion>>() {})
-                .block(); // Seguro no contexto de Virtual Threads
+                .block(); 
                 
         if (questions == null || questions.isEmpty()) {
             throw new RuntimeException("A lista de questões retornada pela API está vazia ou nula.");
@@ -51,7 +52,6 @@ public class EvaluationService {
         log.info("Foram carregadas {} questões.", questions.size());
         return questions;
     }
-
 
     private void submitAnswers(String username, ConcurrentLinkedQueue<Map<String, String>> answersQueue) {
         String spaceId = System.getenv("SPACE_ID");
@@ -90,26 +90,14 @@ public class EvaluationService {
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger failureCount = new AtomicInteger(0);
         
-        // Fila thread-safe exigida para acumular as respostas em ambiente altamente concorrente
         ConcurrentLinkedQueue<Map<String, String>> answersQueue = new ConcurrentLinkedQueue<>();
         
-        Semaphore semaphore = new Semaphore(2);
-
         Instant globalStart = Instant.now();
 
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<CompletableFuture<Void>> futures = questions.stream().map(question -> 
-                CompletableFuture.runAsync(() -> {
-                    try {
-                        semaphore.acquire();
-                        processQuestion(question, successCount, failureCount, answersQueue);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        log.error("[INTERROMPIDO] Espera do semáforo falhou na questão: {}", question.id());
-                    } finally {
-                        semaphore.release();
-                    }
-                }, executor)
+                CompletableFuture.runAsync(() -> 
+                    processQuestion(question, successCount, failureCount, answersQueue), executor)
             ).toList();
 
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
@@ -125,71 +113,50 @@ public class EvaluationService {
         log.info("Tempo total: {} segundos", totalDuration.getSeconds());
         log.info("===========================================");
 
-        // 3. Submit Answers
         try {
             submitAnswers(username, answersQueue);
         } catch (Exception e) {
             log.error("Falha ao enviar resultados para a API de avaliação: {}", e.getMessage());
         }
-        return null;
+        return Map.of(
+            "total", questions.size(),
+            "success", successCount.get(),
+            "failure", failureCount.get(),
+            "duration_seconds", totalDuration.getSeconds()
+        );
     }
-
 
     private void processQuestion(GaiaQuestion question, AtomicInteger successCount, AtomicInteger failureCount, ConcurrentLinkedQueue<Map<String, String>> answersQueue) {
         Instant qStart = Instant.now();
-        log.info("[INÍCIO] Questão {}: {}", question.id(), question.task());
-
+        
         String agentAnswer = null;
         boolean success = false;
-        int maxRetries = 3;
-        int attempt = 0;
 
-        while (attempt < maxRetries && !success) {
-            attempt++;
-            try {
-                CompletableFuture<String> futureAnswer = CompletableFuture.supplyAsync(
-                    () -> agent.answer(question.task())
-                );
-                
-                agentAnswer = futureAnswer.get(120, TimeUnit.SECONDS);
-                success = true;
-
-            } catch (TimeoutException e) {
-                log.warn("[TIMEOUT] Questão {} excedeu 120s na tentativa {}/{}", question.id(), attempt, maxRetries);
-            } catch (ExecutionException e) {
-                Throwable cause = e.getCause();
-                String errorMsg = cause != null ? cause.getMessage() : e.getMessage();
-                
-                if (errorMsg != null && errorMsg.contains("429")) {
-                    log.warn("[RATE LIMIT - 429] Atingido na questão {}. Backoff 60s antes da tentativa {}/{}", question.id(), attempt + 1, maxRetries);
-                    try {
-                        Thread.sleep(60000);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                } else {
-                    log.error("[ERRO] Falha ao executar questão {}: {}", question.id(), errorMsg);
-                    break; 
-                }
-            } catch (Exception e) {
-                log.error("[ERRO INESPERADO] Questão {}: {}", question.id(), e.getMessage());
-                break;
+        try {
+            // O RateLimiter faz a mágica aqui.
+            @SuppressWarnings("UnstableApiUsage")
+            double tempoEspera = rateLimiter.acquire(); 
+            
+            if (tempoEspera > 1.0) {
+                log.info("RateLimiter segurou a task {} por {} segundos para não estourar a API", question.id(), String.format("%.1f", tempoEspera));
             }
+            log.info("[INÍCIO] Processando Task ID: {} | {}", question.id(), question.task());
+            
+            agentAnswer = agent.answer(question.task());
+            success = true;
+
+        } catch (Exception e) {
+            log.error("[ERRO] Falha ao executar questão {}: {}", question.id(), e.getMessage());
+            agentAnswer = "AGENT_ERROR: " + e.getMessage();
         }
 
         long elapsed = Duration.between(qStart, Instant.now()).getSeconds();
         
-        // Se a chamada do agente falhou completamente após os retries, não podemos deixar o array em branco.
-        String finalAnswerToSubmit = (success && agentAnswer != null) ? agentAnswer : "AGENT_ERROR_OR_TIMEOUT";
-        
-        // Acumula na fila concurrente para a chamada final de submissão
         answersQueue.add(Map.of(
                 "task_id", question.id(),
-                "submitted_answer", finalAnswerToSubmit
+                "submitted_answer", agentAnswer != null ? agentAnswer : "AGENT_ERROR_OR_TIMEOUT"
         ));
 
-        // Validação local (se o backend enviar expectedAnswer, o que é o caso)
         if (success && agentAnswer != null && question.expectedAnswer() != null) {
             boolean isCorrect = agentAnswer.strip().equalsIgnoreCase(question.expectedAnswer().strip());
             
@@ -202,7 +169,7 @@ public class EvaluationService {
             }
         } else if (!success) {
             failureCount.incrementAndGet();
-            log.info("[FALHA TÉCNICA] Questão {} abortada após {} tentativas ({}s).", question.id(), attempt, elapsed);
+            log.warn("[FALHA TÉCNICA] Questão {} abortada ({}s).", question.id(), elapsed);
         }
     }
 }
