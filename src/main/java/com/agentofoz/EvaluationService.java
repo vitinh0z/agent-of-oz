@@ -1,5 +1,6 @@
 package com.agentofoz;
 
+import com.google.common.util.concurrent.RateLimiter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
@@ -23,6 +24,12 @@ public class EvaluationService {
     private final BasicAgent agent;
     private final WebClient webClient;
     private static final String SCORING_API_URL = "https://agents-course-unit4-scoring.hf.space";
+
+    // 1. CONFIGURAÇÃO EXATA DA GOOGLE: 15 requisições em 60 segundos
+    // 15.0 / 60.0 = 0.25 requisições por segundo.
+    // Isso cria um "balde" que enche com 1 ficha a cada 4 segundos.
+    @SuppressWarnings("UnstableApiUsage")
+    private final RateLimiter rateLimiter = RateLimiter.create(15.0 / 60.0);
 
     public EvaluationService(BasicAgent agent) {
         this.agent = agent;
@@ -124,26 +131,61 @@ public class EvaluationService {
 
     private void processQuestion(GaiaQuestion question, AtomicInteger successCount, AtomicInteger failureCount, ConcurrentLinkedQueue<Map<String, String>> answersQueue) {
         Instant qStart = Instant.now();
-        log.info("[INÍCIO] Processando Task ID: {} | {}", question.id(), question.task());
         
+        // 2. O PULO DO GATO: ACQUIRE(3)
+        // O agente usa ferramentas, então estimamos que ele faça ~3 chamadas na API do Google por questão.
+        // Ao pedir 3 permits, o Guava calcula: "Ok, vou gastar 3 fichas do balde de 15".
+        @SuppressWarnings("UnstableApiUsage")
+        double tempoEspera = rateLimiter.acquire(3);
+        
+        if (tempoEspera > 1.0) {
+            log.info("RateLimiter segurou a Questão {} por {}s para cravar no limite da API.", question.id(), String.format("%.1f", tempoEspera));
+        }
+
+        log.info("[INÍCIO] Questão {}: {}", question.id(), question.task());
+
         String agentAnswer = null;
         boolean success = false;
+        int maxRetries = 2; // Podemos diminuir os retries, pois o RateLimiter já faz o trabalho pesado
+        int attempt = 0;
 
-        try {
-            // O RateLimiter AGORA É GLOBAL e acontece dentro do 'agent.answer'
-            agentAnswer = agent.answer(question.task());
-            success = true;
+        while (attempt < maxRetries && !success) {
+            attempt++;
+            try {
+                // Aqui nós executamos a chamada sabendo que o tráfego está perfeitamente cadenciado
+                CompletableFuture<String> futureAnswer = CompletableFuture.supplyAsync(
+                    () -> agent.answer(question.task())
+                );
+                
+                agentAnswer = futureAnswer.get(120, TimeUnit.SECONDS);
+                success = true;
 
-        } catch (Exception e) {
-            log.error("[ERRO] Falha ao executar questão {}: {}", question.id(), e.getMessage());
-            agentAnswer = "AGENT_ERROR: " + e.getMessage();
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                String errorMsg = cause != null ? cause.getMessage() : e.getMessage();
+                
+                // Se por um milagre a Google ainda mandar um 429 (ex: uma questão precisou de 5 chamadas em vez de 3),
+                // nós fazemos um backoff de segurança.
+                if (errorMsg != null && errorMsg.contains("429")) {
+                    log.warn("[429] A Google engasgou. Backoff de segurança 20s na tentativa {}/{}", attempt, maxRetries);
+                    try { Thread.sleep(20000); } catch (InterruptedException ie) { break; }
+                } else {
+                    log.error("[ERRO] Questão {}: {}", question.id(), errorMsg);
+                    break; 
+                }
+            } catch (Exception e) {
+                log.error("[ERRO INESPERADO] Questão {}: {}", question.id(), e.getMessage());
+                break;
+            }
         }
 
         long elapsed = Duration.between(qStart, Instant.now()).getSeconds();
         
+        String finalAnswerToSubmit = (success && agentAnswer != null) ? agentAnswer : "AGENT_ERROR_OR_TIMEOUT";
+        
         answersQueue.add(Map.of(
                 "task_id", question.id(),
-                "submitted_answer", agentAnswer != null ? agentAnswer : "AGENT_ERROR_OR_TIMEOUT"
+                "submitted_answer", finalAnswerToSubmit
         ));
 
         if (success && agentAnswer != null && question.expectedAnswer() != null) {
