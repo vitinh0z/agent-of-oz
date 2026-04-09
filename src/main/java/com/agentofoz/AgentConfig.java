@@ -29,13 +29,14 @@ public class AgentConfig {
                 .apiKey(groqApiKey)
                 .modelName("llama-3.1-8b-instant")
                 .temperature(0.0)
-                .maxTokens(512)
+                .maxTokens(256)
+                .maxRetries(0)
                 .build();
                 
         return AiServices.builder(BasicAgent.class)
                 .chatModel(model)
                 .tools(new ToolGaia(tavilyApiKey))
-                .chatMemory(MessageWindowChatMemory.withMaxMessages(10))
+                .chatMemory(MessageWindowChatMemory.withMaxMessages(4))
                 .build();
     }
 }

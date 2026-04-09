@@ -12,4 +12,4 @@ EXPOSE 7860
 RUN useradd -m -u 1000 user
 USER user
 ENV PORT=7860
-ENTRYPOINT ["sh", "-c", "java -XX:+UseZGC -XX:+ZGenerational -jar app.jar --server.port=${PORT}"]
+ENTRYPOINT ["sh", "-c", "java -XX:+UseZGC -XX:+ZGenerational -jar app.jar --server.port=${PORT} -Dpolyglot.engine.WarnInterpreterOnly=false"]

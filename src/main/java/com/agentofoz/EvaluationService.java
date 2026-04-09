@@ -123,6 +123,9 @@ public class EvaluationService {
     }
 
     private void processQuestion(GaiaQuestion question, AtomicInteger successCount, AtomicInteger failureCount, ConcurrentLinkedQueue<Map<String, String>> answersQueue) {
+        // Pausa fixa entre questões para não acumular tokens no burst inicial
+        try { Thread.sleep(3000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+
         Instant qStart = Instant.now();
         log.info("[INÍCIO] Questão {}: {}", question.id(), question.task());
 
@@ -138,20 +141,26 @@ public class EvaluationService {
                 success = true;
 
             } catch (Exception e) {
-                String msg = e.getMessage() != null ? e.getMessage() : "";
-                
-                // Extrai o tempo de espera do erro do Groq: "Please try again in 43.465s"
-                long waitSeconds = 60; // padrão de segurança
+                // Navega até a causa raiz para pegar a mensagem original do Groq
+                Throwable root = e;
+                while (root.getCause() != null) root = root.getCause();
+                String msg = root.getMessage() != null ? root.getMessage() : e.getMessage();
+                if (msg == null) msg = "";
+
+                long waitSeconds = 65;
                 java.util.regex.Matcher m = java.util.regex.Pattern
-                    .compile("try again in ([0-9.]+)s")
+                    .compile("try again in ([0-9]+(?:\\.[0-9]+)?)s")
                     .matcher(msg);
                 if (m.find()) {
-                    waitSeconds = (long) Double.parseDouble(m.group(1)) + 5; // +5s de margem
+                    waitSeconds = (long) Double.parseDouble(m.group(1)) + 5;
                 }
 
-                if (msg.contains("rate_limit") || msg.contains("429")) {
+                if (msg.contains("rate_limit") || msg.contains("429") || msg.contains("Rate limit")) {
                     log.warn("[429] Tentativa {}/{}. Aguardando {}s...", attempt, maxRetries, waitSeconds);
-                    try { Thread.sleep(waitSeconds * 1000); } catch (InterruptedException ie) { break; }
+                    try { Thread.sleep(waitSeconds * 1000L); } catch (InterruptedException ie) { 
+                        Thread.currentThread().interrupt();
+                        break; 
+                    }
                 } else {
                     log.error("[ERRO] Questão {}: {}", question.id(), msg);
                     break;
