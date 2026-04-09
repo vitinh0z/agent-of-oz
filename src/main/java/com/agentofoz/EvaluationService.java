@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Service
 public class EvaluationService {
 
+    private static final int LOCAL_CHAT_MEMORY_MAX_MESSAGES = 6;
     private final BasicAgent agent;
     private final ChatModel chatModel;
     private final ToolGaia toolGaia;
@@ -138,7 +139,7 @@ public class EvaluationService {
                 ? AiServices.builder(BasicAgent.class)
                     .chatModel(chatModel)
                     .tools(toolGaia)
-                    .chatMemory(MessageWindowChatMemory.withMaxMessages(6))
+                    .chatMemory(MessageWindowChatMemory.withMaxMessages(LOCAL_CHAT_MEMORY_MAX_MESSAGES))
                     .build()
                 : agent;
 
