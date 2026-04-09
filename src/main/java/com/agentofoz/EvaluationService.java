@@ -1,6 +1,5 @@
 package com.agentofoz;
 
-import com.google.common.util.concurrent.RateLimiter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
@@ -24,12 +23,6 @@ public class EvaluationService {
     private final BasicAgent agent;
     private final WebClient webClient;
     private static final String SCORING_API_URL = "https://agents-course-unit4-scoring.hf.space";
-
-    // 1. CONFIGURAÇÃO EXATA DA GOOGLE: 15 requisições em 60 segundos
-    // 15.0 / 60.0 = 0.25 requisições por segundo.
-    // Isso cria um "balde" que enche com 1 ficha a cada 4 segundos.
-    @SuppressWarnings("UnstableApiUsage")
-    private final RateLimiter rateLimiter = RateLimiter.create(15.0 / 60.0);
 
     public EvaluationService(BasicAgent agent) {
         this.agent = agent;
@@ -97,7 +90,7 @@ public class EvaluationService {
         
         Instant globalStart = Instant.now();
 
-        try (ExecutorService executor = Executors.newFixedThreadPool(3)) {
+        try (ExecutorService executor = Executors.newFixedThreadPool(1)) {
             List<CompletableFuture<Void>> futures = questions.stream().map(question -> 
                 CompletableFuture.runAsync(() -> 
                     processQuestion(question, successCount, failureCount, answersQueue), executor)
@@ -131,51 +124,38 @@ public class EvaluationService {
 
     private void processQuestion(GaiaQuestion question, AtomicInteger successCount, AtomicInteger failureCount, ConcurrentLinkedQueue<Map<String, String>> answersQueue) {
         Instant qStart = Instant.now();
-        
-        // 2. O PULO DO GATO: ACQUIRE(3)
-        // O agente usa ferramentas, então estimamos que ele faça ~3 chamadas na API do Google por questão.
-        // Ao pedir 3 permits, o Guava calcula: "Ok, vou gastar 3 fichas do balde de 15".
-        @SuppressWarnings("UnstableApiUsage")
-        double tempoEspera = rateLimiter.acquire(3);
-        
-        if (tempoEspera > 1.0) {
-            log.info("RateLimiter segurou a Questão {} por {}s para cravar no limite da API.", question.id(), String.format("%.1f", tempoEspera));
-        }
-
         log.info("[INÍCIO] Questão {}: {}", question.id(), question.task());
 
         String agentAnswer = null;
         boolean success = false;
-        int maxRetries = 2; // Podemos diminuir os retries, pois o RateLimiter já faz o trabalho pesado
+        int maxRetries = 4;
         int attempt = 0;
 
         while (attempt < maxRetries && !success) {
             attempt++;
             try {
-                // Aqui nós executamos a chamada sabendo que o tráfego está perfeitamente cadenciado
-                CompletableFuture<String> futureAnswer = CompletableFuture.supplyAsync(
-                    () -> agent.answer(question.task())
-                );
-                
-                agentAnswer = futureAnswer.get(120, TimeUnit.SECONDS);
+                agentAnswer = agent.answer(question.task());
                 success = true;
 
-            } catch (ExecutionException e) {
-                Throwable cause = e.getCause();
-                String errorMsg = cause != null ? cause.getMessage() : e.getMessage();
-                
-                // Se por um milagre a Google ainda mandar um 429 (ex: uma questão precisou de 5 chamadas em vez de 3),
-                // nós fazemos um backoff de segurança.
-                if (errorMsg != null && errorMsg.contains("429")) {
-                    log.warn("[429] A Google engasgou. Backoff de segurança 20s na tentativa {}/{}", attempt, maxRetries);
-                    try { Thread.sleep(20000); } catch (InterruptedException ie) { break; }
-                } else {
-                    log.error("[ERRO] Questão {}: {}", question.id(), errorMsg);
-                    break; 
-                }
             } catch (Exception e) {
-                log.error("[ERRO INESPERADO] Questão {}: {}", question.id(), e.getMessage());
-                break;
+                String msg = e.getMessage() != null ? e.getMessage() : "";
+                
+                // Extrai o tempo de espera do erro do Groq: "Please try again in 43.465s"
+                long waitSeconds = 60; // padrão de segurança
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("try again in ([0-9.]+)s")
+                    .matcher(msg);
+                if (m.find()) {
+                    waitSeconds = (long) Double.parseDouble(m.group(1)) + 5; // +5s de margem
+                }
+
+                if (msg.contains("rate_limit") || msg.contains("429")) {
+                    log.warn("[429] Tentativa {}/{}. Aguardando {}s...", attempt, maxRetries, waitSeconds);
+                    try { Thread.sleep(waitSeconds * 1000); } catch (InterruptedException ie) { break; }
+                } else {
+                    log.error("[ERRO] Questão {}: {}", question.id(), msg);
+                    break;
+                }
             }
         }
 

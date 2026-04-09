@@ -27,8 +27,9 @@ public class AgentConfig {
         ChatModel model = OpenAiChatModel.builder()
                 .baseUrl("https://api.groq.com/openai/v1")
                 .apiKey(groqApiKey)
-                .modelName("llama-3.3-70b-versatile")
+                .modelName("llama-3.1-8b-instant")
                 .temperature(0.0)
+                .maxTokens(512)
                 .build();
                 
         return AiServices.builder(BasicAgent.class)
