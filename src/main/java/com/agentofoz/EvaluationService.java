@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Service
 public class EvaluationService {
 
-    // Janela curta por questão para reduzir tokens e manter algum contexto local de retries.
+    // Short window per question to reduce tokens and preserve minimal local retry context.
     private static final int LOCAL_CHAT_MEMORY_MAX_MESSAGES = 6;
     private final BasicAgent agent;
     private final ChatModel chatModel;
@@ -136,7 +136,7 @@ public class EvaluationService {
         // Pausa fixa entre questões para não acumular tokens no burst inicial
         try { Thread.sleep(3000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
 
-        // Intencionalmente cria um agente novo por questão para zerar memória entre perguntas.
+        // Intentionally creates a new agent per question to reset memory between questions.
         BasicAgent localAgent = (chatModel != null)
                 ? AiServices.builder(BasicAgent.class)
                     .chatModel(chatModel)
