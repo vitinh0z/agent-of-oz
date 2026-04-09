@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Basic Agent Evaluation Runner</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .container { display: flex; flex-direction: column; gap: 15px; }
+        textarea, input { width: 100%; padding: 10px; box-sizing: border-box; }
+        button { padding: 10px 15px; background: #007bff; color: white; border: none; cursor: pointer; font-size: 16px; border-radius: 4px; }
+        button:hover { background: #0056b3; }
+        .result-box { background: #f8f9fa; padding: 15px; border: 1px solid #ddd; white-space: pre-wrap; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+
+    <h1>Basic Agent Evaluation Runner (Java Edition)</h1>
+    
+    <div class="container">
+        <p><strong>Instructions:</strong></p>
+        <ol>
+            <li>Enter your Hugging Face username below.</li>
+            <li>Click 'Run Evaluation & Submit All Answers'.</li>
+            <li>Wait for the agent to process questions and submit answers.</li>
+        </ol>
+
+        <label for="username">Hugging Face Username:</label>
+        <input type="text" id="username" placeholder="e.g., my_hf_user">
+
+        <button id="runBtn" onclick="runEvaluation()">Run Evaluation & Submit All Answers</button>
+
+        <h3>Status / Submission Result</h3>
+        <div id="status" class="result-box">Waiting to start...</div>
+
+        <h3>Questions and Agent Answers</h3>
+        <table id="resultsTable">
+            <thead>
+                <tr>
+                    <th>Task ID</th>
+                    <th>Question</th>
+                    <th>Submitted Answer</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Results will be populated here -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        async function runEvaluation() {
+            const username = document.getElementById('username').value;
+            if (!username) {
+                alert("Please enter a username.");
+                return;
+            }
+
+            const statusEl = document.getElementById('status');
+            const tableBody = document.querySelector('#resultsTable tbody');
+            const runBtn = document.getElementById('runBtn');
+
+            statusEl.innerText = "Running evaluation... this may take a while.";
+            tableBody.innerHTML = '';
+            runBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/evaluate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    statusEl.innerText = data.status;
+                    
+                    if (data.results) {
+                        data.results.forEach(row => {
+                            const tr = document.createElement('tr');
+                            tr.innerHTML = `
+                                <td>${row['Task ID'] || ''}</td>
+                                <td>${row['Question'] || ''}</td>
+                                <td>${row['Submitted Answer'] || ''}</td>
+                            `;
+                            tableBody.appendChild(tr);
+                        });
+                    }
+                } else {
+                    statusEl.innerText = "Error: " + (data.error || "Unknown error occurred.");
+                }
+            } catch (error) {
+                statusEl.innerText = "Network Error: " + error;
+            } finally {
+                runBtn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
