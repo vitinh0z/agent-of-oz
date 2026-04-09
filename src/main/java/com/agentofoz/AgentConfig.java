@@ -1,9 +1,7 @@
 package com.agentofoz;
 
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
-import dev.langchain4j.service.AiServices;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -18,13 +16,12 @@ public class AgentConfig {
     private String tavilyApiKey;
 
     @Bean
-    public BasicAgent basicAgent() {
+    public ChatModel chatModel() {
         if ("demo".equals(groqApiKey) || groqApiKey.isBlank()) {
-            // Mock behavior corresponding to the python default
-            return question -> "This is a default answer.";
+            return null;
         }
-        
-        ChatModel model = OpenAiChatModel.builder()
+
+        return OpenAiChatModel.builder()
                 .baseUrl("https://api.groq.com/openai/v1")
                 .apiKey(groqApiKey)
                 .modelName("llama-3.1-8b-instant")
@@ -32,11 +29,15 @@ public class AgentConfig {
                 .maxTokens(256)
                 .maxRetries(0)
                 .build();
-                
-        return AiServices.builder(BasicAgent.class)
-                .chatModel(model)
-                .tools(new ToolGaia(tavilyApiKey))
-                .chatMemory(MessageWindowChatMemory.withMaxMessages(4))
-                .build();
+    }
+
+    @Bean
+    public BasicAgent basicAgent() {
+        return question -> "This is a default answer.";
+    }
+
+    @Bean
+    public ToolGaia toolGaia() {
+        return new ToolGaia(tavilyApiKey);
     }
 }

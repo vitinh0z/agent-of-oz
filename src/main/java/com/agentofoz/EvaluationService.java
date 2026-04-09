@@ -1,9 +1,13 @@
 package com.agentofoz;
 
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.service.AiServices;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -20,12 +24,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Service
 public class EvaluationService {
 
+    // Short window per question to reduce tokens and preserve minimal local retry context.
+    private static final int LOCAL_CHAT_MEMORY_MAX_MESSAGES = 6;
     private final BasicAgent agent;
+    private final ChatModel chatModel;
+    private final ToolGaia toolGaia;
     private final WebClient webClient;
     private static final String SCORING_API_URL = "https://agents-course-unit4-scoring.hf.space";
 
-    public EvaluationService(BasicAgent agent) {
+    public EvaluationService(BasicAgent agent, @Nullable ChatModel chatModel, ToolGaia toolGaia) {
         this.agent = agent;
+        this.chatModel = chatModel;
+        this.toolGaia = toolGaia;
         this.webClient = WebClient.builder()
                 .baseUrl(SCORING_API_URL)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
@@ -126,6 +136,15 @@ public class EvaluationService {
         // Pausa fixa entre questões para não acumular tokens no burst inicial
         try { Thread.sleep(3000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
 
+        // Intentionally creates a new agent per question to reset memory between questions.
+        BasicAgent localAgent = (chatModel != null)
+                ? AiServices.builder(BasicAgent.class)
+                    .chatModel(chatModel)
+                    .tools(toolGaia)
+                    .chatMemory(MessageWindowChatMemory.withMaxMessages(LOCAL_CHAT_MEMORY_MAX_MESSAGES))
+                    .build()
+                : agent;
+
         Instant qStart = Instant.now();
         log.info("[INÍCIO] Questão {}: {}", question.id(), question.task());
 
@@ -137,7 +156,7 @@ public class EvaluationService {
         while (attempt < maxRetries && !success) {
             attempt++;
             try {
-                agentAnswer = agent.answer(question.task());
+                agentAnswer = localAgent.answer(question.task());
                 success = true;
 
             } catch (Exception e) {
